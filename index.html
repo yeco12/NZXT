@@ -40,6 +40,7 @@
     .lbl { font-size: clamp(12px, 4.8vmin, 24px); color: var(--muted); letter-spacing:.08em; text-transform:uppercase; }
     .val { font-variant-numeric: tabular-nums; font-weight:900; font-size: clamp(24px, 9.5vmin, 76px); }
     .unit { font-size:.55em; opacity:.8; margin-left:.12em; font-weight:700; }
+  @keyframes blink { 50% { opacity: 0.2; } }
   </style>
   <!-- Debug minimal overlay: visible uniquement si ?debug=1 -->
   <style>
@@ -53,7 +54,7 @@
     <canvas id="dial"></canvas>
     <div class="center">
       <div class="labels">
-        <div class="row"><span class="lbl">CPU</span><span class="lbl">GPU</span><span class="lbl">LIQUID</span></div>
+        <div class=\"row\"><span class=\"lbl\" id=\"lblcpu\" style=\"color:var(--cpu)\">CPU</span><span class=\"lbl\" id=\"lblgpu\" style=\"color:var(--gpu)\">GPU</span><span class=\"lbl\" id=\"lblliq\" style=\"color:var(--liq)\">LIQUID</span></div>
         <div class="row"><span class="val" id="cpu">--<span class="unit">°C</span></span><span class="val" id="gpu">--<span class="unit">°C</span></span><span class="val" id="liq">--<span class="unit">°C</span></span></div>
       </div>
     </div>
@@ -76,6 +77,11 @@
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       ctx.setTransform(dpr,0,0,dpr,0,0);
+      // labels aussi
+      const lCpu=$('lblcpu'), lGpu=$('lblgpu'), lLiq=$('lblliq');
+      lCpu.style.color = cpuAlert? getVar('--hot') : getVar('--cpu');
+      lGpu.style.color = gpuAlert? getVar('--hot') : getVar('--gpu');
+      lLiq.style.color = liqAlert? getVar('--hot') : getVar('--liq');
       draw();
     }
     window.addEventListener('resize', resize);
@@ -132,7 +138,11 @@
         ctx.beginPath();
         ctx.lineWidth = 4;
         const ringCol = ring.key==='cpu' ? getVar('--cpu') : ring.key==='gpu' ? getVar('--gpu') : getVar('--liq');
-        ctx.strokeStyle = ringCol;
+        // couleur dynamique : passe en rouge si seuil dépassé
+        if(ring.key==='cpu' && hist.cpu.length && hist.cpu[hist.cpu.length-1]>80){ ctx.strokeStyle=getVar('--hot'); }
+        else if(ring.key==='gpu' && hist.gpu.length && hist.gpu[hist.gpu.length-1]>75){ ctx.strokeStyle=getVar('--hot'); }
+        else if(ring.key==='liq' && hist.liq.length && hist.liq[hist.liq.length-1]>37){ ctx.strokeStyle=getVar('--hot'); }
+        else { ctx.strokeStyle = ringCol; }
         for (let i = 0; i < L; i++){
           const t = i/(MAX-1); // 0..1
           const a = a0 + t*span;
@@ -157,13 +167,17 @@
 
     // Rendu valeurs centrales
     function paintValues(cpu, gpu, liq){
-      $('cpu').firstChild.nodeValue = fmt(cpu);
-      $('gpu').firstChild.nodeValue = fmt(gpu);
-      $('liq').firstChild.nodeValue = fmt(liq);
-      const col = (t)=> getVar(`--${level(t)}`);
-      $('cpu').style.color = col(cpu);
-      $('gpu').style.color = col(gpu);
-      $('liq').style.color = col(liq);
+      const eCpu=$('cpu'), eGpu=$('gpu'), eLiq=$('liq');
+      eCpu.firstChild.nodeValue = fmt(cpu);
+      eGpu.firstChild.nodeValue = fmt(gpu);
+      eLiq.firstChild.nodeValue = fmt(liq);
+      const cpuAlert = cpu>80, gpuAlert = gpu>75, liqAlert = liq>37;
+      eCpu.style.color = cpuAlert? getVar('--hot') : getVar('--cpu');
+      eGpu.style.color = gpuAlert? getVar('--hot') : getVar('--gpu');
+      eLiq.style.color = liqAlert? getVar('--hot') : getVar('--liq');
+      eCpu.classList.toggle('alert', cpuAlert);
+      eGpu.classList.toggle('alert', gpuAlert);
+      eLiq.classList.toggle('alert', liqAlert);
       draw();
     }
 
