@@ -198,17 +198,30 @@
     const isDebug = params.get('debug') === '1';
     const dbg = document.getElementById('dbg');
     function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
+    logDbg('en attente de CAM…');{ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
 
     let armed = false;
+    let attached = false; // a-t-on installé notre handler dans nzxt.v1 ?
     function handleMonitoringData(data){
       try {
         const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
         const gpu = Array.isArray(data?.gpus)
           ? Math.max(...data.gpus.map(g => g?.temperature ?? -Infinity))
           : data?.gpu?.temperature;
-        const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
-        if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
+        const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp ?? data?.liquid?.temperature;
+        const okCpu = (typeof cpu === 'number' && !Number.isNaN(cpu));
+        const okGpu = (typeof gpu === 'number' && !Number.isNaN(gpu));
+        const okLiq = (typeof liq === 'number' && !Number.isNaN(liq));
+        if (okCpu && okGpu && okLiq){
           if (!armed){ armed = true; app.classList.add('active'); resize(); }
+          push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
+          paintValues(cpu,gpu,liq);
+          logDbg(`OK CPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}${attached?' (attached)':''}`);
+        } else {
+          logDbg(`invalid cpu:${cpu} gpu:${gpu} liq:${liq}${attached?' (handler attaché)':' (handler non attaché)'});
+        }
+      } catch (e) { logDbg('Erreur données'); }
+    }
           push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
           paintValues(cpu,gpu,liq);
           logDbg(`OK CPU:${cpu} GPU:${gpu} LIQ:${liq}`);
@@ -218,11 +231,22 @@
       } catch (e) { logDbg('Erreur données'); }
     }
 
-    window.nzxt = window.nzxt || {};
-    window.nzxt.v1 = window.nzxt.v1 || {};
-    window.nzxt.v1.onMonitoringDataUpdate = handleMonitoringData;
-    if (typeof window.nzxt.v1.subscribeMonitoringData === 'function'){
-      try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); } catch(_){}
+    // (ré)installe régulièrement le handler car CAM peut injecter/écraser window.nzxt APRÈS le chargement
+    function installHandler(){
+      try{
+        if (!window.nzxt) window.nzxt = {};
+        if (!window.nzxt.v1) window.nzxt.v1 = {};
+        if (window.nzxt.v1.onMonitoringDataUpdate !== handleMonitoringData){
+          window.nzxt.v1.onMonitoringDataUpdate = handleMonitoringData;
+          attached = true; logDbg('handler CAM installé');
+        }
+        if (typeof window.nzxt.v1.subscribeMonitoringData === 'function'){
+          try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); attached = true; logDbg('subscribe OK'); } catch(_){}
+        }
+      }catch(e){ /* ignore */ }
+    }
+    installHandler();
+    const reattach = setInterval(()=>{ if (!armed) installHandler(); else clearInterval(reattach); }, 1500);
     }
 
     if (isDemo){
