@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Températures – CPU / GPU / Liquid</title>
+  <style>
+    :root {
+      --bg: #0b0b0c;
+      --fg: #e7e7ea;
+      --muted: #9aa0a6;
+      --ok: #9fe870;
+      --warn: #ffd166;
+      --hot: #ff6b6b;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: var(--bg);
+      color: var(--fg);
+      display: grid;
+      place-items: center;
+    }
+    .wrap {
+      width: 100vw;
+      height: 100vh;
+      padding: 10px;
+      box-sizing: border-box;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 6px;
+    }
+    .header {
+      text-align: center;
+      font-weight: 600;
+      opacity: .9;
+      letter-spacing: .4px;
+      font-size: clamp(10px, 4vw, 14px);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      height: 100%;
+    }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 8px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      box-shadow: 0 2px 10px rgba(0,0,0,.25);
+    }
+    .label {
+      font-size: clamp(9px, 3.2vw, 12px);
+      color: var(--muted);
+      letter-spacing: .6px;
+      text-transform: uppercase;
+    }
+    .value {
+      align-self: center;
+      justify-self: center;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      line-height: 1;
+      font-size: clamp(28px, 15vw, 56px);
+    }
+    .unit {
+      font-weight: 600;
+      opacity: .8;
+      font-size: 0.6em;
+      margin-left: .15em;
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: clamp(8px, 3vw, 11px);
+      color: var(--muted);
+      opacity: .9;
+    }
+    .dot { width: .6em; height: .6em; border-radius: 50%; display: inline-block; margin-right: .4em; }
+    .ok { background: var(--ok); }
+    .warn { background: var(--warn); }
+    .hot { background: var(--hot); }
+    .row { display:flex; align-items:center; gap:.35em; }
+    .hint { text-align:center; opacity:.6; font-size: clamp(9px, 3.2vw, 12px); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">Températures système</div>
+    <div class="grid">
+      <div class="card">
+        <div class="label">CPU</div>
+        <div class="value" id="cpu">--<span class="unit">°C</span></div>
+      </div>
+      <div class="card">
+        <div class="label">GPU</div>
+        <div class="value" id="gpu">--<span class="unit">°C</span></div>
+      </div>
+      <div class="card">
+        <div class="label">Liquid</div>
+        <div class="value" id="liquid">--<span class="unit">°C</span></div>
+      </div>
+    </div>
+    <div class="footer">
+      <div class="row"><span class="dot ok"></span><span id="fps">-- FPS</span></div>
+      <div>NZXT Web Integration</div>
+      <div id="status">Hors Kraken</div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const $ = (id) => document.getElementById(id);
+      const fmt = (n) => (n==null || Number.isNaN(n)) ? "--" : Math.round(n).toString();
+      const level = (t) => t==null?"ok":(t<60?"ok":t<80?"warn":"hot");
+
+      function paintTemps(cpu, gpu, liquid){
+        const c = $("cpu"), g = $("gpu"), l = $("liquid");
+        c.firstChild.nodeValue = fmt(cpu);
+        g.firstChild.nodeValue = fmt(gpu);
+        l.firstChild.nodeValue = fmt(liquid);
+
+        c.parentElement.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue(`--${level(cpu)}`);
+        g.parentElement.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue(`--${level(gpu)}`);
+        l.parentElement.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue(`--${level(liquid)}`);
+      }
+
+      function setStatus(text){ $("status").textContent = text; }
+
+      // Kraken / Config detection helper
+      const isKraken = window.location.search.includes("kraken=1");
+
+      // FPS hint from CAM if available
+      try {
+        const { v1 } = window.nzxt || {}; // CAM injecte window.nzxt.v1
+        if (v1 && typeof v1 === 'object') {
+          if (typeof v1.targetFps === 'number') {
+            $("fps").textContent = `${v1.targetFps} FPS`;
+          }
+        }
+      } catch (e) {}
+
+      // Hook CAM monitoring data if present
+      const hasCam = !!(window.nzxt && window.nzxt.v1 && typeof window.nzxt.v1.onMonitoringDataUpdate === 'function');
+
+      if (hasCam){
+        setStatus(isKraken?"Kraken":"Configuration");
+        // Abonnement aux données (appelé ~toutes les secondes par CAM)
+        window.nzxt.v1.onMonitoringDataUpdate((data) => {
+          try {
+            // Structure MonitoringData (voir types officiels NZXT)
+            const cpuTemp = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
+            const gpuTemp = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
+            const liquidTemp = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp;
+            paintTemps(cpuTemp, gpuTemp, liquidTemp);
+          } catch (e) {
+            setStatus("Erreur données");
+          }
+        });
+      } else {
+        setStatus("Hors Kraken");
+        // Mode démo pour test dans un navigateur normal
+        let t=0, cpu=37, gpu=40, liq=31;
+        setInterval(()=>{
+          t+=1; cpu = 35 + 10*Math.sin(t/6); gpu = 38 + 14*Math.sin(t/7 + 1.2); liq = 30 + 3*Math.sin(t/10);
+          paintTemps(cpu, gpu, liq);
+        }, 1000);
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = "Astuce : ouvrez ce fichier via NZXT CAM > Lighting > Web Integration pour recevoir les vraies données.";
+        document.querySelector('.wrap').appendChild(hint);
+      }
+    })();
+  </script>
+</body>
+</html>
