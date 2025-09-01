@@ -40,9 +40,15 @@
     .val { font-variant-numeric: tabular-nums; font-weight:800; font-size: clamp(16px, 6.2vmin, 40px); }
     .unit { font-size:.55em; opacity:.8; margin-left:.12em; font-weight:700; }
   </style>
+  <!-- Debug minimal overlay: visible uniquement si ?debug=1 -->
+  <style>
+    #dbg{position:fixed;left:8px;bottom:8px;font:12px/1.3 system-ui;background:rgba(0,0,0,.55);color:#fff;padding:6px 8px;border-radius:8px;display:none;white-space:pre;z-index:9}
+    #dbg.on{display:block}
+  </style>
 </head>
 <body>
   <div id="app">
+    <div id="dbg"></div>
     <canvas id="dial"></canvas>
     <div class="center">
       <div class="labels">
@@ -163,25 +169,34 @@
     // === Intégration CAM ===
     const params = new URLSearchParams(location.search);
     const isDemo = params.get('demo') === '1';
+    const isDebug = params.get('debug') === '1';
+    const dbg = document.getElementById('dbg');
+    function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
+
     const hasCam = !!(window.nzxt && window.nzxt.v1 && typeof window.nzxt.v1.onMonitoringDataUpdate === 'function');
+    logDbg(hasCam? 'API CAM détectée. En attente de données…' : 'API CAM absente. (Ouvre dans CAM)');
 
     if (hasCam){
-      // Affiche le contenu uniquement quand on reçoit **de vraies données**
       let armed = false; // passe à true à la 1ère frame valide
+      let firstTs = null;
       window.nzxt.v1.onMonitoringDataUpdate((data) => {
+        if (firstTs===null) firstTs = Date.now();
         try {
           const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
           const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
-          const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp;
+          const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
           if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
             if (!armed){ armed = true; app.classList.add('active'); resize(); }
             push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
             paintValues(cpu,gpu,liq);
+            logDbg(`Données OK\nCPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}`);
+          } else {
+            const waited = Math.round((Date.now()-firstTs)/1000);
+            logDbg(`Données invalides (${waited}s)\ncpu:${cpu} gpu:${gpu} liquid:${liq}`);
           }
-        } catch (e) { /* ignore */ }
+        } catch (e) { logDbg('Erreur données'); }
       });
     } else if (isDemo) {
-      // Mode PREVIEW optionnel uniquement si ?demo=1 dans l'URL (pour tester dans le navigateur)
       app.classList.add('active');
       resize();
       let t=0, cpu=37, gpu=40, liq=31;
@@ -189,10 +204,10 @@
         t+=1; cpu = 35 + 10*Math.sin(t/6); gpu = 38 + 14*Math.sin(t/7 + 1.2); liq = 30 + 3*Math.sin(t/10);
         push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
         paintValues(cpu,gpu,liq);
+        logDbg('MODE DEMO');
       }, 1000);
     } else {
       // Aucune donnée CAM → ne rien afficher (écran vide)
-      // Laisser #app non actif pour que l'écran reste noir.
     }
   })();
   </script>
