@@ -238,6 +238,8 @@
     }
     // boucle d'animation continue pour que le pulse soit présent en permanence
     function loop(){ draw(); requestAnimationFrame(loop); }
+    // ⚠️ fix: initialiser la taille du canvas avant de démarrer la boucle
+    resize();
     requestAnimationFrame(loop);
   })();
   </script>
