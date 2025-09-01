@@ -25,12 +25,12 @@
     #app { display:none; width: 100vmin; height: 100vmin; max-width:100vw; max-height:100vh; aspect-ratio:1/1; border-radius:50%; overflow:hidden; position:relative; }
     #app.active { display:block; }
     #dial { width:100%; height:100%; display:block; }
-    .center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; line-height:1.05; pointer-events:none; }
-    .labels { display:grid; gap:.65em; }
-    .row { display:flex; gap:2em; justify-content:center; }
-    .lbl { font-size: clamp(10px, 3.5vmin, 18px); color: var(--muted); letter-spacing:.08em; text-transform:uppercase; }
-    .val { font-variant-numeric: tabular-nums; font-weight:800; font-size: clamp(22px, 10vmin, 85px); }
-    .unit { font-size:.55em; opacity:.8; margin-left:.12em; font-weight:700; }
+    .center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; line-height:1.1; pointer-events:none; }
+    .labels { display:grid; gap:.5em; }
+    .row { display:flex; gap:2.5em; justify-content:center; }
+    .lbl { font-size: clamp(14px, 5vmin, 28px); color: var(--muted); letter-spacing:.1em; text-transform:uppercase; font-weight:700; }
+    .val { font-variant-numeric: tabular-nums; font-weight:900; font-size: clamp(28px, 10vmin, 80px); }
+    .unit { font-size:.55em; opacity:.8; margin-left:.15em; font-weight:700; }
     #dbg{position:fixed;left:8px;bottom:8px;font:12px/1.3 system-ui;background:rgba(0,0,0,.55);color:#fff;padding:6px 8px;border-radius:8px;display:none;white-space:pre;z-index:9}
     #dbg.on{display:block}
   </style>
@@ -99,9 +99,9 @@
       ctx.restore();
 
       const rings = [
-        { key:'cpu',  r1: R-6, r2: R-32 },
-        { key:'gpu',  r1: R-38, r2: R-64 },
-        { key:'liq',  r1: R-70, r2: R-96 },
+        { key:'cpu',  r1: R-8, r2: R-38 },
+        { key:'gpu',  r1: R-44, r2: R-74 },
+        { key:'liq',  r1: R-80, r2: R-110 },
       ];
 
       rings.forEach((ring)=>{
@@ -116,7 +116,7 @@
         drawRing(ring.r1, ring.r2, a0, a1, true);
         ctx.globalAlpha = 1;
         ctx.beginPath();
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.strokeStyle = getVar('--line');
@@ -200,6 +200,3 @@
   </script>
 </body>
 </html>
-
-
-
