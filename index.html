@@ -173,30 +173,40 @@
     const dbg = document.getElementById('dbg');
     function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
 
-    const hasCam = !!(window.nzxt && window.nzxt.v1 && typeof window.nzxt.v1.onMonitoringDataUpdate === 'function');
-    logDbg(hasCam? 'API CAM détectée. En attente de données…' : 'API CAM absente. (Ouvre dans CAM)');
+    // 🚨 IMPORTANT : CAM appelle NOTRE fonction handler sur window.nzxt.v1.onMonitoringDataUpdate
+    // On définit donc ce handler POUR CAM (et on garde un mode fallback si CAM expose une API différente)
+    let armed = false; // passe à true à la 1ère frame valide
+    function handleMonitoringData(data){
+      try {
+        const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
+        const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
+        const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
+        if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
+          if (!armed){ armed = true; app.classList.add('active'); resize(); }
+          push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
+          paintValues(cpu,gpu,liq);
+          logDbg(`Données OK
+CPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}`);
+        } else {
+          logDbg(`Données invalides
+cpu:${cpu} gpu:${gpu} liquid:${liq}`);
+        }
+      } catch (e) { logDbg('Erreur données'); }
+    }
 
-    if (hasCam){
-      let armed = false; // passe à true à la 1ère frame valide
-      let firstTs = null;
-      window.nzxt.v1.onMonitoringDataUpdate((data) => {
-        if (firstTs===null) firstTs = Date.now();
-        try {
-          const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
-          const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
-          const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
-          if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
-            if (!armed){ armed = true; app.classList.add('active'); resize(); }
-            push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
-            paintValues(cpu,gpu,liq);
-            logDbg(`Données OK\nCPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}`);
-          } else {
-            const waited = Math.round((Date.now()-firstTs)/1000);
-            logDbg(`Données invalides (${waited}s)\ncpu:${cpu} gpu:${gpu} liquid:${liq}`);
-          }
-        } catch (e) { logDbg('Erreur données'); }
-      });
-    } else if (isDemo) {
+    // Définir l'objet attendu par CAM et lui fournir le handler
+    window.nzxt = window.nzxt || {};
+    window.nzxt.v1 = window.nzxt.v1 || {};
+    window.nzxt.v1.onMonitoringDataUpdate = handleMonitoringData;
+
+    // Certains builds ont exposé une API de type "subscribe" → on supporte aussi
+    const hasSubscribe = typeof window.nzxt.v1.subscribeMonitoringData === 'function';
+    if (hasSubscribe) {
+      try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); } catch(_){}
+    }
+
+    // Mode DEMO uniquement si ?demo=1
+    if (isDemo){
       app.classList.add('active');
       resize();
       let t=0, cpu=37, gpu=40, liq=31;
@@ -206,8 +216,6 @@
         paintValues(cpu,gpu,liq);
         logDbg('MODE DEMO');
       }, 1000);
-    } else {
-      // Aucune donnée CAM → ne rien afficher (écran vide)
     }
   })();
   </script>
