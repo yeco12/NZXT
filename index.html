@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Températures – CPU / GPU / Liquid</title>
+  <title>Températures – CPU / GPU / Liquid + Graphes</title>
   <style>
     :root {
       --bg: #0b0b0c;
@@ -12,6 +12,8 @@
       --ok: #9fe870;
       --warn: #ffd166;
       --hot: #ff6b6b;
+      --line: rgba(231,231,234,.85);
+      --grid: rgba(255,255,255,.08);
     }
     html, body { height: 100%; }
     body {
@@ -50,8 +52,9 @@
       border-radius: 14px;
       padding: 8px;
       display: grid;
-      grid-template-rows: auto 1fr;
+      grid-template-rows: auto auto 1fr;
       box-shadow: 0 2px 10px rgba(0,0,0,.25);
+      overflow: hidden;
     }
     .label {
       font-size: clamp(9px, 3.2vw, 12px);
@@ -60,18 +63,24 @@
       text-transform: uppercase;
     }
     .value {
-      align-self: center;
+      align-self: start;
       justify-self: center;
       font-variant-numeric: tabular-nums;
       font-weight: 700;
       line-height: 1;
-      font-size: clamp(28px, 15vw, 56px);
+      font-size: clamp(26px, 10vw, 42px);
     }
     .unit {
       font-weight: 600;
       opacity: .8;
       font-size: 0.6em;
       margin-left: .15em;
+    }
+    canvas.spark {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(to bottom, rgba(255,255,255,.02), rgba(255,255,255,.00));
+      border-radius: 10px;
     }
     .footer {
       display: flex;
@@ -91,19 +100,22 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="header">Températures système</div>
+    <div class="header">Températures système (avec historique)</div>
     <div class="grid">
-      <div class="card">
+      <div class="card" id="card-cpu">
         <div class="label">CPU</div>
         <div class="value" id="cpu">--<span class="unit">°C</span></div>
+        <canvas class="spark" id="cpu-chart"></canvas>
       </div>
-      <div class="card">
+      <div class="card" id="card-gpu">
         <div class="label">GPU</div>
         <div class="value" id="gpu">--<span class="unit">°C</span></div>
+        <canvas class="spark" id="gpu-chart"></canvas>
       </div>
-      <div class="card">
+      <div class="card" id="card-liquid">
         <div class="label">Liquid</div>
         <div class="value" id="liquid">--<span class="unit">°C</span></div>
+        <canvas class="spark" id="liquid-chart"></canvas>
       </div>
     </div>
     <div class="footer">
@@ -119,29 +131,92 @@
       const fmt = (n) => (n==null || Number.isNaN(n)) ? "--" : Math.round(n).toString();
       const level = (t) => t==null?"ok":(t<60?"ok":t<80?"warn":"hot");
 
+      function setStatus(text){ $("status").textContent = text; }
+      const isKraken = window.location.search.includes("kraken=1");
+
+      // Value painters
       function paintTemps(cpu, gpu, liquid){
         const c = $("cpu"), g = $("gpu"), l = $("liquid");
         c.firstChild.nodeValue = fmt(cpu);
         g.firstChild.nodeValue = fmt(gpu);
         l.firstChild.nodeValue = fmt(liquid);
-
-        c.parentElement.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue(`--${level(cpu)}`);
-        g.parentElement.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue(`--${level(gpu)}`);
-        l.parentElement.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue(`--${level(liquid)}`);
+        $("card-cpu").style.borderColor = getVar(`--${level(cpu)}`);
+        $("card-gpu").style.borderColor = getVar(`--${level(gpu)}`);
+        $("card-liquid").style.borderColor = getVar(`--${level(liquid)}`);
       }
 
-      function setStatus(text){ $("status").textContent = text; }
+      // Light sparkline chart impl (no deps)
+      const charts = {
+        cpu: setupChart($("cpu-chart")),
+        gpu: setupChart($("gpu-chart")),
+        liquid: setupChart($("liquid-chart")),
+      };
 
-      // Kraken / Config detection helper
-      const isKraken = window.location.search.includes("kraken=1");
+      function getVar(name){
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+
+      function setupChart(canvas){
+        const ctx = canvas.getContext('2d');
+        const history = [];
+        const maxLen = 120; // ~2 minutes si 1s par tick
+        function resize(){
+          const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+          const rect = canvas.getBoundingClientRect();
+          canvas.width = Math.round(rect.width * dpr);
+          canvas.height = Math.round(rect.height * dpr);
+          ctx.setTransform(dpr,0,0,dpr,0,0); // dessiner en CSS pixels
+          draw();
+        }
+        window.addEventListener('resize', resize);
+
+        function push(value){
+          if (typeof value === 'number' && !Number.isNaN(value)) history.push(value);
+          else if (history.length) history.push(history[history.length-1]);
+          else history.push(0);
+          if (history.length > maxLen) history.shift();
+          draw();
+        }
+
+        function draw(){
+          const w = canvas.clientWidth, h = canvas.clientHeight;
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+          // grid
+          ctx.globalAlpha = 0.6; ctx.lineWidth = 1; ctx.strokeStyle = getVar('--grid');
+          ctx.beginPath();
+          for (let i=1;i<=3;i++){ const y = (h*i/4); ctx.moveTo(0,y); ctx.lineTo(w,y);} 
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+
+          if (history.length < 2) return;
+          // auto-scale with soft bounds
+          let min = Math.min(...history), max = Math.max(...history);
+          const pad = 5; min = Math.floor(min - pad); max = Math.ceil(max + pad);
+          if (max - min < 10) { max = min + 10; }
+          const X = (i) => (i/(maxLen-1))*w;
+          const Y = (v) => h - ((v - min)/(max - min))*h;
+
+          ctx.lineWidth = 2.0;
+          ctx.strokeStyle = getVar('--line');
+          ctx.beginPath();
+          const start = Math.max(0, history.length - maxLen);
+          for (let i=start;i<history.length;i++){
+            const x = X(i-start), y = Y(history[i]);
+            if (i===start) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+          }
+          ctx.stroke();
+        }
+
+        // initial size
+        setTimeout(resize, 0);
+        return { push, resize };
+      }
 
       // FPS hint from CAM if available
       try {
         const { v1 } = window.nzxt || {}; // CAM injecte window.nzxt.v1
-        if (v1 && typeof v1 === 'object') {
-          if (typeof v1.targetFps === 'number') {
-            $("fps").textContent = `${v1.targetFps} FPS`;
-          }
+        if (v1 && typeof v1 === 'object' && typeof v1.targetFps === 'number') {
+          $("fps").textContent = `${v1.targetFps} FPS`;
         }
       } catch (e) {}
 
@@ -150,25 +225,27 @@
 
       if (hasCam){
         setStatus(isKraken?"Kraken":"Configuration");
-        // Abonnement aux données (appelé ~toutes les secondes par CAM)
         window.nzxt.v1.onMonitoringDataUpdate((data) => {
           try {
-            // Structure MonitoringData (voir types officiels NZXT)
             const cpuTemp = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
             const gpuTemp = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
             const liquidTemp = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp;
             paintTemps(cpuTemp, gpuTemp, liquidTemp);
-          } catch (e) {
-            setStatus("Erreur données");
-          }
+            charts.cpu.push(cpuTemp);
+            charts.gpu.push(gpuTemp);
+            charts.liquid.push(liquidTemp);
+          } catch (e) { setStatus("Erreur données"); }
         });
       } else {
         setStatus("Hors Kraken");
-        // Mode démo pour test dans un navigateur normal
+        // Mode démo : valeurs simulées pour tester dans un navigateur normal
         let t=0, cpu=37, gpu=40, liq=31;
         setInterval(()=>{
           t+=1; cpu = 35 + 10*Math.sin(t/6); gpu = 38 + 14*Math.sin(t/7 + 1.2); liq = 30 + 3*Math.sin(t/10);
           paintTemps(cpu, gpu, liq);
+          charts.cpu.push(cpu);
+          charts.gpu.push(gpu);
+          charts.liquid.push(liq);
         }, 1000);
         const hint = document.createElement('div');
         hint.className = 'hint';
