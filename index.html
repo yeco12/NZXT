@@ -3,256 +3,186 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Températures – CPU / GPU / Liquid + Graphes</title>
+  <title>Kraken Dial – CPU / GPU / Liquid (arcs)</title>
   <style>
     :root {
-      --bg: #0b0b0c;
-      --fg: #e7e7ea;
-      --muted: #9aa0a6;
+      --bg: #0b0b0c;     /* fond cam */
+      --fg: #e7e7ea;     /* texte principal */
+      --muted: #9aa0a6;  /* texte secondaire */
       --ok: #9fe870;
       --warn: #ffd166;
       --hot: #ff6b6b;
-      --line: rgba(231,231,234,.85);
       --grid: rgba(255,255,255,.08);
+      --line: rgba(231,231,234,.9);
     }
     html, body { height: 100%; }
     body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      background: var(--bg);
-      color: var(--fg);
-      display: grid;
-      place-items: center;
-    }
-    .wrap {
-      width: 100vw;
-      height: 100vh;
-      padding: 10px;
-      box-sizing: border-box;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      gap: 6px;
-    }
-    .header {
-      text-align: center;
-      font-weight: 600;
-      opacity: .9;
-      letter-spacing: .4px;
-      font-size: clamp(10px, 4vw, 14px);
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-      height: 100%;
-    }
-    .card {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 14px;
-      padding: 8px;
-      display: grid;
-      grid-template-rows: auto auto 1fr;
-      box-shadow: 0 2px 10px rgba(0,0,0,.25);
+      margin: 0; background: var(--bg); color: var(--fg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial;
+      display: grid; place-items: center;
       overflow: hidden;
     }
-    .label {
-      font-size: clamp(9px, 3.2vw, 12px);
-      color: var(--muted);
-      letter-spacing: .6px;
-      text-transform: uppercase;
+    /* Le contenu reste masqué tant que CAM n'envoie pas de vraies données */
+    #app { display:none; width: 92vmin; height: 92vmin; max-width:100vw; max-height:100vh; aspect-ratio:1/1; border-radius:50%; overflow:hidden; position:relative; }
+    #app.active { display:block; }
+
+    /* Canvas plein écran dans le cercle */
+    #dial { width:100%; height:100%; display:block; }
+
+    /* Valeurs au centre */
+    .center {
+      position:absolute; inset:0; display:grid; place-items:center;
+      text-align:center; line-height:1.05; pointer-events:none;
     }
-    .value {
-      align-self: start;
-      justify-self: center;
-      font-variant-numeric: tabular-nums;
-      font-weight: 700;
-      line-height: 1;
-      font-size: clamp(26px, 10vw, 42px);
-    }
-    .unit {
-      font-weight: 600;
-      opacity: .8;
-      font-size: 0.6em;
-      margin-left: .15em;
-    }
-    canvas.spark {
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(to bottom, rgba(255,255,255,.02), rgba(255,255,255,.00));
-      border-radius: 10px;
-    }
-    .footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: clamp(8px, 3vw, 11px);
-      color: var(--muted);
-      opacity: .9;
-    }
-    .dot { width: .6em; height: .6em; border-radius: 50%; display: inline-block; margin-right: .4em; }
-    .ok { background: var(--ok); }
-    .warn { background: var(--warn); }
-    .hot { background: var(--hot); }
-    .row { display:flex; align-items:center; gap:.35em; }
-    .hint { text-align:center; opacity:.6; font-size: clamp(9px, 3.2vw, 12px); }
+    .labels { display:grid; gap:.25em; }
+    .row { display:flex; gap:1.25em; justify-content:center; }
+    .lbl { font-size: clamp(8px, 2.7vmin, 14px); color: var(--muted); letter-spacing:.08em; text-transform:uppercase; }
+    .val { font-variant-numeric: tabular-nums; font-weight:800; font-size: clamp(16px, 6.2vmin, 40px); }
+    .unit { font-size:.55em; opacity:.8; margin-left:.12em; font-weight:700; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="header">Températures système (avec historique)</div>
-    <div class="grid">
-      <div class="card" id="card-cpu">
-        <div class="label">CPU</div>
-        <div class="value" id="cpu">--<span class="unit">°C</span></div>
-        <canvas class="spark" id="cpu-chart"></canvas>
+  <div id="app">
+    <canvas id="dial"></canvas>
+    <div class="center">
+      <div class="labels">
+        <div class="row"><span class="lbl">CPU</span><span class="lbl">GPU</span><span class="lbl">LIQUID</span></div>
+        <div class="row"><span class="val" id="cpu">--<span class="unit">°C</span></span><span class="val" id="gpu">--<span class="unit">°C</span></span><span class="val" id="liq">--<span class="unit">°C</span></span></div>
       </div>
-      <div class="card" id="card-gpu">
-        <div class="label">GPU</div>
-        <div class="value" id="gpu">--<span class="unit">°C</span></div>
-        <canvas class="spark" id="gpu-chart"></canvas>
-      </div>
-      <div class="card" id="card-liquid">
-        <div class="label">Liquid</div>
-        <div class="value" id="liquid">--<span class="unit">°C</span></div>
-        <canvas class="spark" id="liquid-chart"></canvas>
-      </div>
-    </div>
-    <div class="footer">
-      <div class="row"><span class="dot ok"></span><span id="fps">-- FPS</span></div>
-      <div>NZXT Web Integration</div>
-      <div id="status">Hors Kraken</div>
     </div>
   </div>
 
   <script>
-    (function(){
-      const $ = (id) => document.getElementById(id);
-      const fmt = (n) => (n==null || Number.isNaN(n)) ? "--" : Math.round(n).toString();
-      const level = (t) => t==null?"ok":(t<60?"ok":t<80?"warn":"hot");
+  (function(){
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => (n==null || Number.isNaN(n)) ? "--" : Math.round(n).toString();
+    const level = (t) => t==null?"ok":(t<60?"ok":t<80?"warn":"hot");
+    const getVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-      function setStatus(text){ $("status").textContent = text; }
-      const isKraken = window.location.search.includes("kraken=1");
+    const app = $("app"), canvas = $("dial"), ctx = canvas.getContext('2d');
+    const hist = { cpu: [], gpu: [], liq: [] };
+    const MAX = 180; // ~3 minutes si tick ~1s
 
-      // Value painters
-      function paintTemps(cpu, gpu, liquid){
-        const c = $("cpu"), g = $("gpu"), l = $("liquid");
-        c.firstChild.nodeValue = fmt(cpu);
-        g.firstChild.nodeValue = fmt(gpu);
-        l.firstChild.nodeValue = fmt(liquid);
-        $("card-cpu").style.borderColor = getVar(`--${level(cpu)}`);
-        $("card-gpu").style.borderColor = getVar(`--${level(gpu)}`);
-        $("card-liquid").style.borderColor = getVar(`--${level(liquid)}`);
-      }
+    function resize(){
+      const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      draw();
+    }
+    window.addEventListener('resize', resize);
 
-      // Light sparkline chart impl (no deps)
-      const charts = {
-        cpu: setupChart($("cpu-chart")),
-        gpu: setupChart($("gpu-chart")),
-        liquid: setupChart($("liquid-chart")),
-      };
+    function push(arr, v){
+      if (typeof v === 'number' && !Number.isNaN(v)) arr.push(v);
+      else if (arr.length) arr.push(arr[arr.length-1]);
+      else arr.push(0);
+      if (arr.length > MAX) arr.shift();
+    }
 
-      function getVar(name){
-        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-      }
+    function autoScale(arr){
+      if (!arr.length) return {min:0, max:100};
+      let min = Math.min(...arr), max = Math.max(...arr);
+      const pad = 4; min = Math.floor(min - pad); max = Math.ceil(max + pad);
+      if (max - min < 10) max = min + 10;
+      return {min, max};
+    }
 
-      function setupChart(canvas){
-        const ctx = canvas.getContext('2d');
-        const history = [];
-        const maxLen = 120; // ~2 minutes si 1s par tick
-        function resize(){
-          const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-          const rect = canvas.getBoundingClientRect();
-          canvas.width = Math.round(rect.width * dpr);
-          canvas.height = Math.round(rect.height * dpr);
-          ctx.setTransform(dpr,0,0,dpr,0,0); // dessiner en CSS pixels
-          draw();
+    function draw(){
+      const w = canvas.clientWidth, h = canvas.clientHeight; if (!w||!h) return;
+      const cx = w/2, cy = h/2; const R = Math.min(w,h)/2 - 6; // rayon extérieur
+      ctx.clearRect(0,0,w,h);
+
+      // grille radiale
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.strokeStyle = getVar('--grid');
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = .8;
+      for (let i=1;i<=3;i++){ const r = (R * i)/4; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke(); }
+      ctx.restore();
+
+      // paramètres des anneaux (extérieur -> intérieur)
+      const rings = [
+        { key:'cpu',  r1: R-4, r2: R-24 },
+        { key:'gpu',  r1: R-28, r2: R-48 },
+        { key:'liq',  r1: R-52, r2: R-72 },
+      ];
+
+      rings.forEach((ring)=>{
+        const arr = hist[ring.key]; if (arr.length < 2) return;
+        const {min,max} = autoScale(arr);
+        const a0 = -Math.PI*0.8;           // début (en haut-gauche)
+        const a1 =  Math.PI*0.8;           // fin (en haut-droit) -> 288° d'arc
+        const span = a1 - a0;
+        const L = Math.min(arr.length, MAX);
+        ctx.save(); ctx.translate(cx, cy);
+        // fond de l'anneau
+        ctx.globalAlpha = .35; ctx.fillStyle = getVar('--grid');
+        drawRing(ring.r1, ring.r2, a0, a1, true);
+        ctx.globalAlpha = 1;
+        // ligne historique
+        ctx.beginPath();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = getVar('--line');
+        for (let i = 0; i < L; i++){
+          const t = i/(MAX-1); // 0..1
+          const a = a0 + t*span;
+          const v = arr[arr.length - L + i];
+          const k = (v - min) / (max - min);
+          const r = ring.r2 + (ring.r1 - ring.r2) * Math.min(Math.max(k,0),1);
+          const x = Math.cos(a) * r, y = Math.sin(a) * r;
+          if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
         }
-        window.addEventListener('resize', resize);
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
 
-        function push(value){
-          if (typeof value === 'number' && !Number.isNaN(value)) history.push(value);
-          else if (history.length) history.push(history[history.length-1]);
-          else history.push(0);
-          if (history.length > maxLen) history.shift();
-          draw();
-        }
+    function drawRing(rOuter, rInner, a0, a1, fill){
+      const cw = canvas.clientWidth, ch = canvas.clientHeight;
+      ctx.beginPath();
+      ctx.arc(0,0,rOuter,a0,a1,false);
+      ctx.arc(0,0,rInner,a1,a0,true);
+      ctx.closePath();
+      if (fill) ctx.fill(); else ctx.stroke();
+    }
 
-        function draw(){
-          const w = canvas.clientWidth, h = canvas.clientHeight;
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-          // grid
-          ctx.globalAlpha = 0.6; ctx.lineWidth = 1; ctx.strokeStyle = getVar('--grid');
-          ctx.beginPath();
-          for (let i=1;i<=3;i++){ const y = (h*i/4); ctx.moveTo(0,y); ctx.lineTo(w,y);} 
-          ctx.stroke();
-          ctx.globalAlpha = 1;
+    // Rendu valeurs centrales
+    function paintValues(cpu, gpu, liq){
+      $('cpu').firstChild.nodeValue = fmt(cpu);
+      $('gpu').firstChild.nodeValue = fmt(gpu);
+      $('liq').firstChild.nodeValue = fmt(liq);
+      const col = (t)=> getVar(`--${level(t)}`);
+      $('cpu').style.color = col(cpu);
+      $('gpu').style.color = col(gpu);
+      $('liq').style.color = col(liq);
+      draw();
+    }
 
-          if (history.length < 2) return;
-          // auto-scale with soft bounds
-          let min = Math.min(...history), max = Math.max(...history);
-          const pad = 5; min = Math.floor(min - pad); max = Math.ceil(max + pad);
-          if (max - min < 10) { max = min + 10; }
-          const X = (i) => (i/(maxLen-1))*w;
-          const Y = (v) => h - ((v - min)/(max - min))*h;
+    // === Intégration CAM ===
+    const hasCam = !!(window.nzxt && window.nzxt.v1 && typeof window.nzxt.v1.onMonitoringDataUpdate === 'function');
 
-          ctx.lineWidth = 2.0;
-          ctx.strokeStyle = getVar('--line');
-          ctx.beginPath();
-          const start = Math.max(0, history.length - maxLen);
-          for (let i=start;i<history.length;i++){
-            const x = X(i-start), y = Y(history[i]);
-            if (i===start) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    if (hasCam){
+      // Affiche le contenu uniquement quand on reçoit **de vraies données**
+      let armed = false; // passe à true à la 1ère frame valide
+      window.nzxt.v1.onMonitoringDataUpdate((data) => {
+        try {
+          const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
+          const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
+          const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp;
+          if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
+            if (!armed){ armed = true; app.classList.add('active'); resize(); }
+            push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
+            paintValues(cpu,gpu,liq);
           }
-          ctx.stroke();
-        }
-
-        // initial size
-        setTimeout(resize, 0);
-        return { push, resize };
-      }
-
-      // FPS hint from CAM if available
-      try {
-        const { v1 } = window.nzxt || {}; // CAM injecte window.nzxt.v1
-        if (v1 && typeof v1 === 'object' && typeof v1.targetFps === 'number') {
-          $("fps").textContent = `${v1.targetFps} FPS`;
-        }
-      } catch (e) {}
-
-      // Hook CAM monitoring data if present
-      const hasCam = !!(window.nzxt && window.nzxt.v1 && typeof window.nzxt.v1.onMonitoringDataUpdate === 'function');
-
-      if (hasCam){
-        setStatus(isKraken?"Kraken":"Configuration");
-        window.nzxt.v1.onMonitoringDataUpdate((data) => {
-          try {
-            const cpuTemp = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
-            const gpuTemp = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
-            const liquidTemp = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp;
-            paintTemps(cpuTemp, gpuTemp, liquidTemp);
-            charts.cpu.push(cpuTemp);
-            charts.gpu.push(gpuTemp);
-            charts.liquid.push(liquidTemp);
-          } catch (e) { setStatus("Erreur données"); }
-        });
-      } else {
-        setStatus("Hors Kraken");
-        // Mode démo : valeurs simulées pour tester dans un navigateur normal
-        let t=0, cpu=37, gpu=40, liq=31;
-        setInterval(()=>{
-          t+=1; cpu = 35 + 10*Math.sin(t/6); gpu = 38 + 14*Math.sin(t/7 + 1.2); liq = 30 + 3*Math.sin(t/10);
-          paintTemps(cpu, gpu, liq);
-          charts.cpu.push(cpu);
-          charts.gpu.push(gpu);
-          charts.liquid.push(liq);
-        }, 1000);
-        const hint = document.createElement('div');
-        hint.className = 'hint';
-        hint.textContent = "Astuce : ouvrez ce fichier via NZXT CAM > Lighting > Web Integration pour recevoir les vraies données.";
-        document.querySelector('.wrap').appendChild(hint);
-      }
-    })();
+        } catch (e) { /* ignore */ }
+      });
+    } else {
+      // Aucune donnée CAM → ne rien afficher (écran vide), pas de mode démo
+      // Laisser #app non actif pour que l'écran reste noir.
+    }
+  })();
   </script>
 </body>
 </html>
