@@ -3,42 +3,46 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kraken Dial – CPU / GPU / Liquid (arcs + pulse CPU)</title>
+  <title>Kraken Dial – CPU / GPU / Liquid (arcs)</title>
   <style>
     :root {
-      --bg1: #0b0b0c;
-      --bg2: #1a1a1d;
-      --fg: #e7e7ea;
-      --muted: #9aa0a6;
+      --bg: #0b0b0c; /* fond cam */
+      --fg: #e7e7ea; /* texte principal */
+      --muted: #9aa0a6; /* texte secondaire */
       --ok: #9fe870;
       --warn: #ffd166;
       --hot: #ff6b6b;
       --grid: rgba(255,255,255,.08);
       --line: rgba(231,231,234,.9);
+      /* Couleurs dédiées par capteur */
+      --cpu: #ff7b54;
+      --gpu: #6aa0ff;
+      --liq: #55e0e0;
     }
     html, body { height: 100%; }
     body {
-      margin: 0; color: var(--fg);
+      margin: 0; background: var(--bg); color: var(--fg);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial;
       display: grid; place-items: center;
       overflow: hidden;
-      background: radial-gradient(circle at center, var(--bg2) 0%, var(--bg1) 100%);
-      animation: pulse 6s ease-in-out infinite;
     }
-    @keyframes pulse {
-      0%,100% { background-size: 100% 100%; }
-      50% { background-size: 120% 120%; }
-    }
-
-    #app { display:none; width: 100vmin; height: 100vmin; max-width:100vw; max-height:100vh; aspect-ratio:1/1; border-radius:50%; overflow:hidden; position:relative; backdrop-filter: blur(4px); }
+    /* Le contenu reste masqué tant que CAM n'envoie pas de vraies données */
+    #app { display:none; width: 100vmin; height: 100vmin; max-width:100vw; max-height:100vh; aspect-ratio:1/1; border-radius:50%; overflow:hidden; position:relative; }
     #app.active { display:block; }
+
+    /* Canvas plein écran dans le cercle */
     #dial { width:100%; height:100%; display:block; }
-    .center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; line-height:1.1; pointer-events:none; }
-    .labels { display:grid; gap:.5em; }
-    .row { display:flex; gap:2.5em; justify-content:center; }
-    .lbl { font-size: clamp(14px, 5vmin, 28px); color: var(--muted); letter-spacing:.1em; text-transform:uppercase; font-weight:700; }
-    .val { font-variant-numeric: tabular-nums; font-weight:900; font-size: clamp(28px, 10vmin, 80px); }
-    .unit { font-size:.55em; opacity:.8; margin-left:.15em; font-weight:700; }
+
+    /* Valeurs au centre */
+    .center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; line-height:1.05; pointer-events:none; }
+    .labels { display:grid; gap:.25em; }
+    .row { display:flex; gap:1.25em; justify-content:center; }
+    .lbl { font-size: clamp(12px, 4.8vmin, 24px); color: var(--muted); letter-spacing:.08em; text-transform:uppercase; }
+    .val { font-variant-numeric: tabular-nums; font-weight:900; font-size: clamp(24px, 9.5vmin, 76px); }
+    .unit { font-size:.55em; opacity:.8; margin-left:.12em; font-weight:700; }
+  </style>
+  <!-- Debug minimal overlay: visible uniquement si ?debug=1 -->
+  <style>
     #dbg{position:fixed;left:8px;bottom:8px;font:12px/1.3 system-ui;background:rgba(0,0,0,.55);color:#fff;padding:6px 8px;border-radius:8px;display:none;white-space:pre;z-index:9}
     #dbg.on{display:block}
   </style>
@@ -64,9 +68,7 @@
 
     const app = $("app"), canvas = $("dial"), ctx = canvas.getContext('2d');
     const hist = { cpu: [], gpu: [], liq: [] };
-    const nz = (window.nzxt && window.nzxt.v1) || {};
-    const fps = Number(nz.targetFps) || 30;
-    const MAX = Math.round(fps * 180 / 30);
+    const MAX = 180; // ~3 minutes si tick ~1s
 
     function resize(){
       const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
@@ -86,82 +88,53 @@
     }
 
     function autoScale(arr){
-      if (!arr.length) return {min:20, max:100};
-      let min = Math.max(15, Math.min(...arr) - 4);
-      let max = Math.min(110, Math.max(...arr) + 4);
+      if (!arr.length) return {min:0, max:100};
+      let min = Math.min(...arr), max = Math.max(...arr);
+      const pad = 4; min = Math.floor(min - pad); max = Math.ceil(max + pad);
       if (max - min < 10) max = min + 10;
       return {min, max};
     }
 
     function draw(){
       const w = canvas.clientWidth, h = canvas.clientHeight; if (!w||!h) return;
-      const cx = w/2, cy = h/2; const R = Math.min(w,h)/2 - 10;
+      const cx = w/2, cy = h/2; const R = Math.min(w,h)/2 - 6; // rayon extérieur
       ctx.clearRect(0,0,w,h);
 
-      // === FOND ANIMÉ piloté UNIQUEMENT par la température CPU ===
-      const now = performance.now()/1000;
-      const lastCpu = hist.cpu[hist.cpu.length-1];
-      if (typeof lastCpu === 'number' && !Number.isNaN(lastCpu)){
-        const heat = Math.min(1, Math.max(0, (lastCpu - 30) / 50)); // 30°C→0, 80°C→1
-        // vitesse et amplitude augmentent avec la chaleur
-        const speed = 1.6 + 1.4*heat;                // 1.6x à 3.0x
-        const pulse = 0.55 + 0.45*Math.sin(now*speed);
-        const haloR = R * (0.70 + 0.10*pulse + 0.18*heat); // rayon plus grand quand c'est chaud
-        const col = heat<.33 ? getVar('--ok') : heat<.66 ? getVar('--warn') : getVar('--hot');
-        const rgba = (rgb, a)=> rgb.trim().startsWith('rgba') ? rgb : rgb.replace('rgb', 'rgba').replace(')', `, ${a})`);
-        ctx.save(); ctx.translate(cx, cy);
-        const grad = ctx.createRadialGradient(0,0, Math.max(0,haloR*0.15), 0,0, haloR);
-        grad.addColorStop(0, rgba(col, 0.20 + 0.30*heat)); // intensité dépend de la chaleur
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0,0, haloR, 0, Math.PI*2); ctx.fill();
-        // léger balayage périphérique (toujours présent, mais drive par CPU aussi)
-        const sweepA = now * (0.6 + 0.6*heat);
-        const sweepW = Math.PI * (0.14 + 0.08*heat);
-        ctx.globalAlpha = 0.12 + 0.20*heat;
-        ctx.fillStyle = rgba(col, 0.65);
-        ctx.beginPath();
-        ctx.arc(0,0, R-6, sweepA, sweepA + sweepW, false);
-        ctx.arc(0,0, R-46, sweepA + sweepW, sweepA, true);
-        ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-        ctx.restore();
-      }
-
-      // === GRILLE RADIALE ===
+      // grille radiale
       ctx.save();
       ctx.translate(cx, cy);
       ctx.strokeStyle = getVar('--grid');
       ctx.lineWidth = 1;
-      ctx.globalAlpha = .6;
+      ctx.globalAlpha = .8;
       for (let i=1;i<=3;i++){ const r = (R * i)/4; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke(); }
       ctx.restore();
 
-      // === ANNEAUX HISTORIQUES ===
+      // paramètres des anneaux (extérieur -> intérieur)
       const rings = [
-        { key:'cpu',  r1: R-8, r2: R-38 },
-        { key:'gpu',  r1: R-44, r2: R-74 },
-        { key:'liq',  r1: R-80, r2: R-110 },
+        { key:'liq',  r1: R-6,  r2: R-36 },   // extérieur
+        { key:'gpu',  r1: R-40, r2: R-70 },   // milieu
+        { key:'cpu',  r1: R-74, r2: R-104 },  // intérieur
       ];
 
       rings.forEach((ring)=>{
         const arr = hist[ring.key]; if (arr.length < 2) return;
         const {min,max} = autoScale(arr);
-        const a0 = -Math.PI*0.8;
-        const a1 =  Math.PI*0.8;
+        const a0 = -Math.PI*0.8;           // début (en haut-gauche)
+        const a1 =  Math.PI*0.8;           // fin (en haut-droit) -> 288° d'arc
         const span = a1 - a0;
         const L = Math.min(arr.length, MAX);
         ctx.save(); ctx.translate(cx, cy);
-        ctx.globalAlpha = .30; ctx.fillStyle = getVar('--grid');
+        // fond de l'anneau
+        ctx.globalAlpha = .35; ctx.fillStyle = getVar('--grid');
         drawRing(ring.r1, ring.r2, a0, a1, true);
         ctx.globalAlpha = 1;
+        // ligne historique
         ctx.beginPath();
         ctx.lineWidth = 4;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = getVar('--line');
+        const ringCol = ring.key==='cpu' ? getVar('--cpu') : ring.key==='gpu' ? getVar('--gpu') : getVar('--liq');
+        ctx.strokeStyle = ringCol;
         for (let i = 0; i < L; i++){
-          const t = i/(MAX-1);
+          const t = i/(MAX-1); // 0..1
           const a = a0 + t*span;
           const v = arr[arr.length - L + i];
           const k = (v - min) / (max - min);
@@ -174,7 +147,7 @@
       });
     }
 
-    function drawRing(rOuter, rInner, a0, a1, fill){(rOuter, rInner, a0, a1, fill){
+    function drawRing(rOuter, rInner, a0, a1, fill){
       ctx.beginPath();
       ctx.arc(0,0,rOuter,a0,a1,false);
       ctx.arc(0,0,rInner,a1,a0,true);
@@ -182,6 +155,7 @@
       if (fill) ctx.fill(); else ctx.stroke();
     }
 
+    // Rendu valeurs centrales
     function paintValues(cpu, gpu, liq){
       $('cpu').firstChild.nodeValue = fmt(cpu);
       $('gpu').firstChild.nodeValue = fmt(gpu);
@@ -193,62 +167,46 @@
       draw();
     }
 
+    // === Intégration CAM ===
     const params = new URLSearchParams(location.search);
     const isDemo = params.get('demo') === '1';
     const isDebug = params.get('debug') === '1';
     const dbg = document.getElementById('dbg');
     function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
-    logDbg('en attente de CAM…');{ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
 
-    let armed = false;
-    let attached = false; // a-t-on installé notre handler dans nzxt.v1 ?
+    // 🚨 IMPORTANT : CAM appelle NOTRE fonction handler sur window.nzxt.v1.onMonitoringDataUpdate
+    // On définit donc ce handler POUR CAM (et on garde un mode fallback si CAM expose une API différente)
+    let armed = false; // passe à true à la 1ère frame valide
     function handleMonitoringData(data){
       try {
         const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
-        const gpu = Array.isArray(data?.gpus)
-          ? Math.max(...data.gpus.map(g => g?.temperature ?? -Infinity))
-          : data?.gpu?.temperature;
-        const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp ?? data?.liquid?.temperature;
-        const okCpu = (typeof cpu === 'number' && !Number.isNaN(cpu));
-        const okGpu = (typeof gpu === 'number' && !Number.isNaN(gpu));
-        const okLiq = (typeof liq === 'number' && !Number.isNaN(liq));
-        if (okCpu && okGpu && okLiq){
+        const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
+        const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
+        if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
           if (!armed){ armed = true; app.classList.add('active'); resize(); }
           push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
           paintValues(cpu,gpu,liq);
-          logDbg(`OK CPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}${attached?' (attached)':''}`);
+          logDbg(`Données OK
+CPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}`);
         } else {
-          logDbg(`invalid cpu:${cpu} gpu:${gpu} liq:${liq}${attached?' (handler attaché)':' (handler non attaché)'});
-        }
-      } catch (e) { logDbg('Erreur données'); }
-    }
-          push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
-          paintValues(cpu,gpu,liq);
-          logDbg(`OK CPU:${cpu} GPU:${gpu} LIQ:${liq}`);
-        } else {
-          logDbg(`invalid cpu:${cpu} gpu:${gpu} liq:${liq}`);
+          logDbg(`Données invalides
+cpu:${cpu} gpu:${gpu} liquid:${liq}`);
         }
       } catch (e) { logDbg('Erreur données'); }
     }
 
-    // (ré)installe régulièrement le handler car CAM peut injecter/écraser window.nzxt APRÈS le chargement
-    function installHandler(){
-      try{
-        if (!window.nzxt) window.nzxt = {};
-        if (!window.nzxt.v1) window.nzxt.v1 = {};
-        if (window.nzxt.v1.onMonitoringDataUpdate !== handleMonitoringData){
-          window.nzxt.v1.onMonitoringDataUpdate = handleMonitoringData;
-          attached = true; logDbg('handler CAM installé');
-        }
-        if (typeof window.nzxt.v1.subscribeMonitoringData === 'function'){
-          try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); attached = true; logDbg('subscribe OK'); } catch(_){}
-        }
-      }catch(e){ /* ignore */ }
-    }
-    installHandler();
-    const reattach = setInterval(()=>{ if (!armed) installHandler(); else clearInterval(reattach); }, 1500);
+    // Définir l'objet attendu par CAM et lui fournir le handler
+    window.nzxt = window.nzxt || {};
+    window.nzxt.v1 = window.nzxt.v1 || {};
+    window.nzxt.v1.onMonitoringDataUpdate = handleMonitoringData;
+
+    // Certains builds ont exposé une API de type "subscribe" → on supporte aussi
+    const hasSubscribe = typeof window.nzxt.v1.subscribeMonitoringData === 'function';
+    if (hasSubscribe) {
+      try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); } catch(_){}
     }
 
+    // Mode DEMO uniquement si ?demo=1
     if (isDemo){
       app.classList.add('active');
       resize();
@@ -260,11 +218,6 @@
         logDbg('MODE DEMO');
       }, 1000);
     }
-    // boucle d'animation continue pour que le pulse soit présent en permanence
-    function loop(){ draw(); requestAnimationFrame(loop); }
-    // ⚠️ fix: initialiser la taille du canvas avant de démarrer la boucle
-    resize();
-    requestAnimationFrame(loop);
   })();
   </script>
 </body>
