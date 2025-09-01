@@ -161,6 +161,8 @@
     }
 
     // === Intégration CAM ===
+    const params = new URLSearchParams(location.search);
+    const isDemo = params.get('demo') === '1';
     const hasCam = !!(window.nzxt && window.nzxt.v1 && typeof window.nzxt.v1.onMonitoringDataUpdate === 'function');
 
     if (hasCam){
@@ -178,8 +180,18 @@
           }
         } catch (e) { /* ignore */ }
       });
+    } else if (isDemo) {
+      // Mode PREVIEW optionnel uniquement si ?demo=1 dans l'URL (pour tester dans le navigateur)
+      app.classList.add('active');
+      resize();
+      let t=0, cpu=37, gpu=40, liq=31;
+      setInterval(()=>{
+        t+=1; cpu = 35 + 10*Math.sin(t/6); gpu = 38 + 14*Math.sin(t/7 + 1.2); liq = 30 + 3*Math.sin(t/10);
+        push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
+        paintValues(cpu,gpu,liq);
+      }, 1000);
     } else {
-      // Aucune donnée CAM → ne rien afficher (écran vide), pas de mode démo
+      // Aucune donnée CAM → ne rien afficher (écran vide)
       // Laisser #app non actif pour que l'écran reste noir.
     }
   })();
