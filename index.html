@@ -191,8 +191,9 @@
     let armed = false; // passe à true à la 1ère frame valide
     function handleMonitoringData(data){
       try {
+        const cpuOffset = parseInt(params.get('cpudelta')||'-5',10); // offset ajustable via URL, défaut -5°C
         const cpuRaw = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
-        const cpu = (typeof cpuRaw==='number') ? cpuRaw - 5 : cpuRaw; // ajuste de -5°C
+        const cpu = (typeof cpuRaw==='number') ? cpuRaw + cpuOffset : cpuRaw;
         const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
         const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
         if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
