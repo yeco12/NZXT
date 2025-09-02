@@ -6,15 +6,10 @@
   <title>Kraken Dial – CPU / GPU / Liquid (style anneau)</title>
   <style>
     :root {
-      --bg: #0b0b0c; /* fond cam */
-      --fg: #e7e7ea; /* texte principal */
-      --muted: #9aa0a6; /* texte secondaire */
-      --ok: #9fe870;
-      --warn: #ffd166;
+      --bg: #0b0b0c;
+      --fg: #e7e7ea;
+      --muted: #9aa0a6;
       --hot: #ff6b6b;
-      --grid: rgba(255,255,255,.08);
-      --line: rgba(231,231,234,.9);
-      /* Couleurs dédiées par capteur */
       --cpu: #ff7b54;
       --gpu: #6aa0ff;
       --liq: #55e0e0;
@@ -26,34 +21,18 @@
       display: grid; place-items: center;
       overflow: hidden;
     }
-    /* Le contenu reste masqué tant que CAM n'envoie pas de vraies données */
     #app { display:none; width: 100vmin; height: 100vmin; max-width:100vw; max-height:100vh; aspect-ratio:1/1; border-radius:50%; overflow:hidden; position:relative; }
     #app.active { display:block; }
-
-    /* Canvas plein écran dans le cercle */
     #dial { width:100%; height:100%; display:block; }
-    /* panneau central 3 colonnes */
-    .panel { position:absolute; inset:12% 10%; display:grid; grid-template-columns: 1fr 1fr 1fr; align-items:center; gap:0; border-radius:50%; }
+
+    .panel { position:absolute; inset:15% 10%; display:grid; grid-template-columns: 1fr 1fr 1fr; align-items:center; }
     .col { display:grid; justify-items:center; gap:.35em; }
     .sep { width:1px; height:70%; background: rgba(255,255,255,.08); justify-self:center; }
     .name { font-size: clamp(10px, 2.8vmin, 16px); color: var(--muted); font-weight:600; }
-    .tline { display:flex; align-items:baseline; gap:.25em; }
     .big { font-weight:900; font-size: clamp(22px, 7.8vmin, 56px); }
     .unit { font-size:.55em; opacity:.85; font-weight:700; }
     .small { font-size: clamp(10px, 2.6vmin, 14px); opacity:.9; }
-    .icon { opacity:.9; }
 
-    /* Valeurs au centre */
-    .center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; line-height:1.05; pointer-events:none; }
-    .labels { display:grid; gap:.25em; }
-    .row { display:flex; gap:1.25em; justify-content:center; }
-    .lbl { font-size: clamp(12px, 4.8vmin, 24px); color: var(--muted); letter-spacing:.08em; text-transform:uppercase; }
-    .val { font-variant-numeric: tabular-nums; font-weight:900; font-size: clamp(24px, 9.5vmin, 76px); }
-    .unit { font-size:.55em; opacity:.8; margin-left:.12em; font-weight:700; }
-  @keyframes blink { 50% { opacity: 0.2; } }
-  </style>
-  <!-- Debug minimal overlay: visible uniquement si ?debug=1 -->
-  <style>
     #dbg{position:fixed;left:8px;bottom:8px;font:12px/1.3 system-ui;background:rgba(0,0,0,.55);color:#fff;padding:6px 8px;border-radius:8px;display:none;white-space:pre;z-index:9}
     #dbg.on{display:block}
   </style>
@@ -65,23 +44,21 @@
     <div class="panel">
       <div class="col">
         <div class="name" id="namecpu">CPU</div>
-        <div class="tline"><span class="big val" id="cpu">--<span class="unit">°C</span></span></div>
+        <div><span class="big val" id="cpu">--<span class="unit">°C</span></span></div>
         <div class="small" id="loadcpu">--%</div>
       </div>
       <div class="sep"></div>
       <div class="col">
         <div class="name" id="namegpu">GPU</div>
-        <div class="tline"><span class="big val" id="gpu">--<span class="unit">°C</span></span></div>
+        <div><span class="big val" id="gpu">--<span class="unit">°C</span></span></div>
         <div class="small" id="loadgpu">--%</div>
       </div>
       <div class="sep"></div>
       <div class="col">
         <div class="name" id="nameliq">LIQUID</div>
-        <div class="tline"><span class="big val" id="liq">--<span class="unit">°C</span></span></div>
+        <div><span class="big val" id="liq">--<span class="unit">°C</span></span></div>
         <div class="small" id="flowliq">&nbsp;</div>
       </div>
-    </div>
-  </div>
     </div>
   </div>
 
@@ -89,77 +66,59 @@
   (function(){
     const $ = (id) => document.getElementById(id);
     const fmt = (n) => (n==null || Number.isNaN(n)) ? "--" : Math.round(n).toString();
-    const level = (t) => t==null?"ok":(t<60?"ok":t<80?"warn":"hot");
     const getVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
     const app = $("app"), canvas = $("dial"), ctx = canvas.getContext('2d');
     const hist = { cpu: [], gpu: [], liq: [] };
-    // ⚙️ LIRE LES PARAMÈTRES DÈS MAINTENANT (évite les ReferenceError)
     const params = new URLSearchParams(location.search);
     const isDemo = params.get('demo') === '1';
     const isDebug = params.get('debug') === '1';
-    const isPerf = params.get('perf') === '1';
-    const capFps = (()=>{ const n = parseInt(params.get('fps')||'',10); return Number.isFinite(n)&&n>0?n:(isPerf?25:0); })();
-    const MAX = (params.get('history') ? Math.max(30, Math.min(600, parseInt(params.get('history'),10)||180)) : (isPerf?120:180)); // historique (plus court en mode perf)
+    const dbg = document.getElementById('dbg');
 
     function resize(){
-      const rawDpr = (window.devicePixelRatio || 1);
-      const dpr = isPerf ? 1 : Math.max(1, Math.floor(rawDpr));
       const rect = canvas.getBoundingClientRect();
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
-      ctx.setTransform(dpr,0,0,dpr,0,0);
+      canvas.width = rect.width;
+      canvas.height = rect.height;
       draw();
     }
     window.addEventListener('resize', resize);
+    resize(); // initialise dès le départ
 
     function push(arr, v){
       if (typeof v === 'number' && !Number.isNaN(v)) arr.push(v);
-      else if (arr.length) arr.push(arr[arr.length-1]);
-      else arr.push(0);
-      if (arr.length > MAX) arr.shift();
-    }
-
-    function autoScale(arr){
-      if (!arr.length) return {min:0, max:100};
-      let min = Math.min(...arr), max = Math.max(...arr);
-      const pad = 4; min = Math.floor(min - pad); max = Math.ceil(max + pad);
-      if (max - min < 10) max = min + 10;
-      return {min, max};
+      if (arr.length > 60) arr.shift();
     }
 
     function draw(){
       const w = canvas.clientWidth, h = canvas.clientHeight; if (!w||!h) return;
-      const cx = w/2, cy = h/2; const R = Math.min(w,h)/2 - 6; // rayon extérieur
+      const cx = w/2, cy = h/2; const R = Math.min(w,h)/2 - 10;
       ctx.clearRect(0,0,w,h);
 
-      // anneau de fond
       ctx.save();
       ctx.translate(cx, cy);
       ctx.beginPath();
-      ctx.lineWidth = Math.max(10, R*0.14);
+      ctx.lineWidth = R*0.14;
       ctx.strokeStyle = 'rgba(255,255,255,0.08)';
       ctx.arc(0,0,R*0.82, 0, Math.PI*2);
       ctx.stroke();
 
-      // segments colorés (CPU/GPU/LIQ) autour du cercle
-      const segGap = Math.PI * 0.06; // espace entre segments
+      const segGap = Math.PI * 0.06;
       const segLen = (Math.PI*2 - segGap*3)/3;
-      const baseA = -Math.PI/2; // départ en haut
+      const baseA = -Math.PI/2;
       const last = {
         cpu: hist.cpu[hist.cpu.length-1],
         gpu: hist.gpu[hist.gpu.length-1],
         liq: hist.liq[hist.liq.length-1],
       };
       const parts = [
-        {key:'cpu',  a0: baseA,                 col: getVar('--cpu'),  hot: (last.cpu>80)},
+        {key:'cpu',  a0: baseA,                   col: getVar('--cpu'),  hot: (last.cpu>80)},
         {key:'gpu',  a0: baseA + segLen + segGap, col: getVar('--gpu'),  hot: (last.gpu>75)},
         {key:'liq',  a0: baseA + (segLen+segGap)*2, col: getVar('--liq'), hot: (last.liq>37)},
       ];
       parts.forEach(p=>{
         const a1 = p.a0 + segLen;
         ctx.beginPath();
-        ctx.lineWidth = Math.max(10, R*0.14);
+        ctx.lineWidth = R*0.14;
         ctx.lineCap = 'round';
         ctx.strokeStyle = p.hot ? getVar('--hot') : p.col;
         ctx.arc(0,0,R*0.82, p.a0, a1);
@@ -168,43 +127,19 @@
       ctx.restore();
     }
 
-    function drawRing(rOuter, rInner, a0, a1, fill){
-      // plus utilisé dans ce style
-      if (!fill) return;
-    }(rOuter, rInner, a0, a1, fill){
-      ctx.beginPath();
-      ctx.arc(0,0,rOuter,a0,a1,false);
-      ctx.arc(0,0,rInner,a1,a0,true);
-      ctx.closePath();
-      if (fill) ctx.fill(); else ctx.stroke();
-    }
-
-    // Rendu valeurs centrales
     function paintValues(cpu, gpu, liq){
-      const eCpu=$('cpu'), eGpu=$('gpu'), eLiq=$('liq');
-      eCpu.firstChild.nodeValue = fmt(cpu);
-      eGpu.firstChild.nodeValue = fmt(gpu);
-      eLiq.firstChild.nodeValue = fmt(liq);
-      const cpuAlert = cpu>80, gpuAlert = gpu>75, liqAlert = liq>37;
-      eCpu.style.color = cpuAlert? getVar('--hot') : getVar('--cpu');
-      eGpu.style.color = gpuAlert? getVar('--hot') : getVar('--gpu');
-      eLiq.style.color = liqAlert? getVar('--hot') : getVar('--liq');
-      eCpu.classList.toggle('alert', cpuAlert);
-      eGpu.classList.toggle('alert', gpuAlert);
-      eLiq.classList.toggle('alert', liqAlert);
+      $('cpu').firstChild.nodeValue = fmt(cpu);
+      $('gpu').firstChild.nodeValue = fmt(gpu);
+      $('liq').firstChild.nodeValue = fmt(liq);
       draw();
     }
 
-    // === Intégration CAM ===
-    const dbg = document.getElementById('dbg');
     function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
 
-    // 🚨 IMPORTANT : CAM appelle NOTRE fonction handler sur window.nzxt.v1.onMonitoringDataUpdate
-    // On définit donc ce handler POUR CAM (et on garde un mode fallback si CAM expose une API différente)
-    let armed = false; // passe à true à la 1ère frame valide
+    let armed = false;
     function handleMonitoringData(data){
       try {
-        const cpuOffset = parseInt(params.get('cpudelta')||'-5',10); // offset ajustable via URL, défaut -5°C
+        const cpuOffset = parseInt(params.get('cpudelta')||'-5',10);
         const cpuRaw = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
         const cpu = (typeof cpuRaw==='number') ? cpuRaw + cpuOffset : cpuRaw;
         const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
@@ -213,37 +148,27 @@
           if (!armed){ armed = true; app.classList.add('active'); resize(); }
           push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
           paintValues(cpu,gpu,liq);
-          logDbg(`Données OK
-CPU:${Math.round(cpu)} GPU:${Math.round(gpu)} LIQ:${Math.round(liq)}`);
+          logDbg(`OK CPU:${cpu} GPU:${gpu} LIQ:${liq}`);
         } else {
-          logDbg(`Données invalides
-cpu:${cpu} gpu:${gpu} liquid:${liq}`);
+          logDbg(`Invalid cpu:${cpu} gpu:${gpu} liq:${liq}`);
         }
-      } catch (e) { logDbg('Erreur données'); }
+      } catch(e){ logDbg('Erreur données'); }
     }
 
-    // Définir l'objet attendu par CAM et lui fournir le handler
     window.nzxt = window.nzxt || {};
     window.nzxt.v1 = window.nzxt.v1 || {};
     window.nzxt.v1.onMonitoringDataUpdate = handleMonitoringData;
+    if (typeof window.nzxt.v1.subscribeMonitoringData === 'function'){
+      try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); } catch(_){}}
 
-    // Certains builds ont exposé une API de type "subscribe" → on supporte aussi
-    const hasSubscribe = typeof window.nzxt.v1.subscribeMonitoringData === 'function';
-    if (hasSubscribe) {
-      try { window.nzxt.v1.subscribeMonitoringData(handleMonitoringData); } catch(_){}
-    }
-
-    // Mode DEMO uniquement si ?demo=1
     if (isDemo){
-      app.classList.add('active');
-      resize();
-      let t=0, cpu=37, gpu=40, liq=31;
+      app.classList.add('active'); resize();
+      let t=0,cpu=37,gpu=40,liq=31;
       setInterval(()=>{
-        t+=1; cpu = 35 + 10*Math.sin(t/6); gpu = 38 + 14*Math.sin(t/7 + 1.2); liq = 30 + 3*Math.sin(t/10);
-        push(hist.cpu, cpu); push(hist.gpu, gpu); push(hist.liq, liq);
+        t++; cpu = 35+10*Math.sin(t/6); gpu=38+14*Math.sin(t/7+1.2); liq=30+3*Math.sin(t/10);
+        push(hist.cpu,cpu); push(hist.gpu,gpu); push(hist.liq,liq);
         paintValues(cpu,gpu,liq);
-        logDbg('MODE DEMO');
-      }, 1000);
+      },1000);
     }
   })();
   </script>
