@@ -69,6 +69,12 @@
 
     const app = $("app"), canvas = $("dial"), ctx = canvas.getContext('2d');
     const hist = { cpu: [], gpu: [], liq: [] };
+    // ⚙️ LIRE LES PARAMÈTRES DÈS MAINTENANT (évite les ReferenceError)
+    const params = new URLSearchParams(location.search);
+    const isDemo = params.get('demo') === '1';
+    const isDebug = params.get('debug') === '1';
+    const isPerf = params.get('perf') === '1';
+    const capFps = (()=>{ const n = parseInt(params.get('fps')||'',10); return Number.isFinite(n)&&n>0?n:(isPerf?25:0); })();
     const MAX = (params.get('history') ? Math.max(30, Math.min(600, parseInt(params.get('history'),10)||180)) : (isPerf?120:180)); // historique (plus court en mode perf)
 
     function resize(){
@@ -178,11 +184,6 @@
     }
 
     // === Intégration CAM ===
-    const params = new URLSearchParams(location.search);
-    const isDemo = params.get('demo') === '1';
-    const isDebug = params.get('debug') === '1';
-    const isPerf = params.get('perf') === '1';
-    const capFps = (()=>{ const n = parseInt(params.get('fps')||'',10); return Number.isFinite(n)&&n>0?n:(isPerf?25:0); })();
     const dbg = document.getElementById('dbg');
     function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
 
