@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kraken Dial – CPU / GPU / Liquid (arcs)</title>
+  <title>Kraken Dial – CPU / GPU / Liquid (style anneau)</title>
   <style>
     :root {
       --bg: #0b0b0c; /* fond cam */
@@ -32,6 +32,16 @@
 
     /* Canvas plein écran dans le cercle */
     #dial { width:100%; height:100%; display:block; }
+    /* panneau central 3 colonnes */
+    .panel { position:absolute; inset:12% 10%; display:grid; grid-template-columns: 1fr 1fr 1fr; align-items:center; gap:0; border-radius:50%; }
+    .col { display:grid; justify-items:center; gap:.35em; }
+    .sep { width:1px; height:70%; background: rgba(255,255,255,.08); justify-self:center; }
+    .name { font-size: clamp(10px, 2.8vmin, 16px); color: var(--muted); font-weight:600; }
+    .tline { display:flex; align-items:baseline; gap:.25em; }
+    .big { font-weight:900; font-size: clamp(22px, 7.8vmin, 56px); }
+    .unit { font-size:.55em; opacity:.85; font-weight:700; }
+    .small { font-size: clamp(10px, 2.6vmin, 14px); opacity:.9; }
+    .icon { opacity:.9; }
 
     /* Valeurs au centre */
     .center { position:absolute; inset:0; display:grid; place-items:center; text-align:center; line-height:1.05; pointer-events:none; }
@@ -52,11 +62,26 @@
   <div id="app">
     <div id="dbg"></div>
     <canvas id="dial"></canvas>
-    <div class="center">
-      <div class="labels">
-        <div class=\"row\"><span class=\"lbl\" id=\"lblcpu\" style=\"color:var(--cpu)\">CPU</span><span class=\"lbl\" id=\"lblgpu\" style=\"color:var(--gpu)\">GPU</span><span class=\"lbl\" id=\"lblliq\" style=\"color:var(--liq)\">LIQUID</span></div>
-        <div class="row"><span class="val" id="cpu">--<span class="unit">°C</span></span><span class="val" id="gpu">--<span class="unit">°C</span></span><span class="val" id="liq">--<span class="unit">°C</span></span></div>
+    <div class="panel">
+      <div class="col">
+        <div class="name" id="namecpu">CPU</div>
+        <div class="tline"><span class="big val" id="cpu">--<span class="unit">°C</span></span></div>
+        <div class="small" id="loadcpu">--%</div>
       </div>
+      <div class="sep"></div>
+      <div class="col">
+        <div class="name" id="namegpu">GPU</div>
+        <div class="tline"><span class="big val" id="gpu">--<span class="unit">°C</span></span></div>
+        <div class="small" id="loadgpu">--%</div>
+      </div>
+      <div class="sep"></div>
+      <div class="col">
+        <div class="name" id="nameliq">LIQUID</div>
+        <div class="tline"><span class="big val" id="liq">--<span class="unit">°C</span></span></div>
+        <div class="small" id="flowliq">&nbsp;</div>
+      </div>
+    </div>
+  </div>
     </div>
   </div>
 
@@ -108,58 +133,45 @@
       const cx = w/2, cy = h/2; const R = Math.min(w,h)/2 - 6; // rayon extérieur
       ctx.clearRect(0,0,w,h);
 
-      // grille radiale
+      // anneau de fond
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.strokeStyle = getVar('--grid');
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = .8;
-      for (let i=1;i<=3;i++){ const r = (R * i)/4; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke(); }
-      ctx.restore();
+      ctx.beginPath();
+      ctx.lineWidth = Math.max(10, R*0.14);
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.arc(0,0,R*0.82, 0, Math.PI*2);
+      ctx.stroke();
 
-      // paramètres des anneaux (extérieur -> intérieur)
-      const rings = [
-        { key:'liq',  r1: R-6,  r2: R-36 },   // extérieur
-        { key:'gpu',  r1: R-40, r2: R-70 },   // milieu
-        { key:'cpu',  r1: R-74, r2: R-104 },  // intérieur
+      // segments colorés (CPU/GPU/LIQ) autour du cercle
+      const segGap = Math.PI * 0.06; // espace entre segments
+      const segLen = (Math.PI*2 - segGap*3)/3;
+      const baseA = -Math.PI/2; // départ en haut
+      const last = {
+        cpu: hist.cpu[hist.cpu.length-1],
+        gpu: hist.gpu[hist.gpu.length-1],
+        liq: hist.liq[hist.liq.length-1],
+      };
+      const parts = [
+        {key:'cpu',  a0: baseA,                 col: getVar('--cpu'),  hot: (last.cpu>80)},
+        {key:'gpu',  a0: baseA + segLen + segGap, col: getVar('--gpu'),  hot: (last.gpu>75)},
+        {key:'liq',  a0: baseA + (segLen+segGap)*2, col: getVar('--liq'), hot: (last.liq>37)},
       ];
-
-      rings.forEach((ring)=>{
-        const arr = hist[ring.key]; if (arr.length < 2) return;
-        const {min,max} = autoScale(arr);
-        const a0 = -Math.PI*0.8;           // début (en haut-gauche)
-        const a1 =  Math.PI*0.8;           // fin (en haut-droit) -> 288° d'arc
-        const span = a1 - a0;
-        const L = Math.min(arr.length, MAX);
-        ctx.save(); ctx.translate(cx, cy);
-        // fond de l'anneau
-        ctx.globalAlpha = .35; ctx.fillStyle = getVar('--grid');
-        drawRing(ring.r1, ring.r2, a0, a1, true);
-        ctx.globalAlpha = 1;
-        // ligne historique
+      parts.forEach(p=>{
+        const a1 = p.a0 + segLen;
         ctx.beginPath();
-        ctx.lineWidth = 4;
-        const ringCol = ring.key==='cpu' ? getVar('--cpu') : ring.key==='gpu' ? getVar('--gpu') : getVar('--liq');
-        // couleur dynamique : passe en rouge si seuil dépassé
-        if(ring.key==='cpu' && hist.cpu.length && hist.cpu[hist.cpu.length-1]>80){ ctx.strokeStyle=getVar('--hot'); }
-        else if(ring.key==='gpu' && hist.gpu.length && hist.gpu[hist.gpu.length-1]>75){ ctx.strokeStyle=getVar('--hot'); }
-        else if(ring.key==='liq' && hist.liq.length && hist.liq[hist.liq.length-1]>37){ ctx.strokeStyle=getVar('--hot'); }
-        else { ctx.strokeStyle = ringCol; }
-        for (let i = 0; i < L; i++){
-          const t = i/(MAX-1); // 0..1
-          const a = a0 + t*span;
-          const v = arr[arr.length - L + i];
-          const k = (v - min) / (max - min);
-          const r = ring.r2 + (ring.r1 - ring.r2) * Math.min(Math.max(k,0),1);
-          const x = Math.cos(a) * r, y = Math.sin(a) * r;
-          if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-        }
+        ctx.lineWidth = Math.max(10, R*0.14);
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = p.hot ? getVar('--hot') : p.col;
+        ctx.arc(0,0,R*0.82, p.a0, a1);
         ctx.stroke();
-        ctx.restore();
       });
+      ctx.restore();
     }
 
     function drawRing(rOuter, rInner, a0, a1, fill){
+      // plus utilisé dans ce style
+      if (!fill) return;
+    }(rOuter, rInner, a0, a1, fill){
       ctx.beginPath();
       ctx.arc(0,0,rOuter,a0,a1,false);
       ctx.arc(0,0,rInner,a1,a0,true);
