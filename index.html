@@ -69,19 +69,15 @@
 
     const app = $("app"), canvas = $("dial"), ctx = canvas.getContext('2d');
     const hist = { cpu: [], gpu: [], liq: [] };
-    const MAX = 180; // ~3 minutes si tick ~1s
+    const MAX = (params.get('history') ? Math.max(30, Math.min(600, parseInt(params.get('history'),10)||180)) : (isPerf?120:180)); // historique (plus court en mode perf)
 
     function resize(){
-      const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+      const rawDpr = (window.devicePixelRatio || 1);
+      const dpr = isPerf ? 1 : Math.max(1, Math.floor(rawDpr));
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       ctx.setTransform(dpr,0,0,dpr,0,0);
-      // labels aussi
-      const lCpu=$('lblcpu'), lGpu=$('lblgpu'), lLiq=$('lblliq');
-      lCpu.style.color = cpuAlert? getVar('--hot') : getVar('--cpu');
-      lGpu.style.color = gpuAlert? getVar('--hot') : getVar('--gpu');
-      lLiq.style.color = liqAlert? getVar('--hot') : getVar('--liq');
       draw();
     }
     window.addEventListener('resize', resize);
@@ -185,6 +181,8 @@
     const params = new URLSearchParams(location.search);
     const isDemo = params.get('demo') === '1';
     const isDebug = params.get('debug') === '1';
+    const isPerf = params.get('perf') === '1';
+    const capFps = (()=>{ const n = parseInt(params.get('fps')||'',10); return Number.isFinite(n)&&n>0?n:(isPerf?25:0); })();
     const dbg = document.getElementById('dbg');
     function logDbg(msg){ if (!isDebug) return; dbg.classList.add('on'); dbg.textContent = String(msg); }
 
@@ -193,7 +191,8 @@
     let armed = false; // passe à true à la 1ère frame valide
     function handleMonitoringData(data){
       try {
-        const cpu = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
+        const cpuRaw = Array.isArray(data?.cpus) ? data.cpus[0]?.temperature : data?.cpu?.temperature;
+        const cpu = (typeof cpuRaw==='number') ? cpuRaw - 5 : cpuRaw; // ajuste de -5°C
         const gpu = Array.isArray(data?.gpus) ? data.gpus[0]?.temperature : data?.gpu?.temperature;
         const liq = data?.kraken?.liquidTemperature ?? data?.kraken?.liquidTemp ?? data?.cooler?.liquidTemp;
         if ([cpu,gpu,liq].every(v => typeof v === 'number' && !Number.isNaN(v))){
